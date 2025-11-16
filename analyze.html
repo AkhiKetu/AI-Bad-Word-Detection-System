@@ -5,25 +5,148 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Analyze Content - ToxicScan</title>
   <link rel="stylesheet" href="main.css" />
+  <style>
+    .chips { display:inline-flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:16px; }
+    .chip{display:inline-block;padding:6px 12px;border-radius:999px;font-weight:600}
+    .chip.none{background:#e8f5e9;color:#1b5e20}
+    .chip.political-hate{background:#ede7ff;color:#3d2aa6}
+    .chip.religious-hate{background:#fff0f0;color:#9b1b30}
+    .chip.abusive{background:#ffe8e6;color:#9c1b1b}
+    .chip.profane{background:#fff3e0;color:#e65100}
+    .chip.other{background:#ede7f6;color:#4a148c}
+
+    .preview{margin-top:14px;padding:14px;border-radius:10px;background:#fff;border:1px solid #eee;
+             white-space:pre-wrap;line-height:1.6;font-size:1rem;text-align:left}
+
+    .hl-none{background:rgba(76,175,80,.18);padding:2px 3px;border-radius:6px}
+    .hl-political-hate{background:rgba(103,58,183,.20);padding:2px 3px;border-radius:6px}
+    .hl-religious-hate{background:rgba(220,20,60,.20);padding:2px 3px;border-radius:6px}
+    .hl-abusive{background:rgba(198,40,40,.20);padding:2px 3px;border-radius:6px}
+    .hl-profane{background:rgba(255,152,0,.22);padding:2px 3px;border-radius:6px}
+    .hl-other{background:rgba(156,39,176,.16);padding:2px 3px;border-radius:6px}
+  </style>
 </head>
 <body class="analyze-page">
   <div class="analyze-container">
     <a href="index.html" class="back-btn">← Back</a>
-
     <h1>Analyze Your Content</h1>
-    <p class="subtitle">
-      Enter your text below and our AI will analyze it for inappropriate language and toxicity.
-    </p>
+    <p class="subtitle">Enter your text below and our AI will analyze it for inappropriate language and toxicity.</p>
 
     <div class="text-box">
       <label for="textInput">Enter text to analyze</label>
       <textarea id="textInput" placeholder="Type or paste your text here..."></textarea>
       <p class="hint">Press Cmd/Ctrl + Enter to analyze</p>
-      <button class="btn disabled">Analyze Content</button>
+      <button class="btn" id="analyzeBtn">Analyze Content</button>
     </div>
+
+    <div id="chipsBox" class="chips"></div>
+    <div id="preview" class="preview" style="display:none;"></div>
 
     <p class="footer">⚙️ Powered by SafeText AI</p>
   </div>
-</body>
 
+<script>
+const input=document.getElementById("textInput");
+const btn=document.getElementById("analyzeBtn");
+const chipsBox=document.getElementById("chipsBox");
+const preview=document.getElementById("preview");
+
+input.addEventListener("keydown",e=>{if((e.ctrlKey||e.metaKey)&&e.key==="Enter")btn.click();});
+
+const COLORS={"none":"none","political hate":"political-hate","religious hate":"religious-hate","abusive":"abusive","profane":"profane","other":"other"};
+const labelClass=l=>COLORS[l.toLowerCase()]||"other";
+const hlClass=l=>"hl-"+(COLORS[l.toLowerCase()]||"other");
+
+function normalize(t){return t.toLowerCase().replace(/[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]/g," ").replace(/\s+/g," ").trim();}
+function tokenize(t){return normalize(t).split(" ").filter(Boolean);}
+function jaccard(a,b){const A=new Set(a),B=new Set(b);const inter=[...A].filter(x=>B.has(x)).length;return inter/(new Set([...A,...B]).size||1);}
+function dice(a,b){const bi=s=>{const o=[];for(let i=0;i<s.length-1;i++)o.push(s.slice(i,i+2));return o;};const A=bi(normalize(a)),B=bi(normalize(b));const inter=A.filter(x=>B.includes(x)).length;return (2*inter)/(A.length+B.length||1);}
+function splitSentences(t){
+  // handles Bangla and English punctuation or missing marks
+  return t.trim()
+    .replace(/([.!?।])/g,"$1|")
+    .split("|")
+    .map(s=>s.trim())
+    .filter(Boolean);
+}
+function escapeHTML(s){return s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+let DATASET=[];
+async function loadDataset(){
+  const r=await fetch("train_data.jsonl",{cache:"no-store"});
+  if(!r.ok)return false;
+  const txt=await r.text();
+  DATASET=[];
+  for(const line of txt.split(/\r?\n/)){
+    if(!line.trim())continue;
+    try{
+      const o=JSON.parse(line);
+      const inp=(o.input||"").trim();
+      const out=(o.output||"Other").trim();
+      if(inp)DATASET.push({text:inp,label:out,norm:normalize(inp),tok:tokenize(inp)});
+    }catch{}
+  }
+  return DATASET.length>0;
+}
+
+// The fixed detector: each sentence independently checks every dataset entry
+function detect(paragraph){
+  const sents=splitSentences(paragraph);
+  const results=[];
+  for(const s of sents){
+    const snorm=normalize(s),stok=tokenize(s);
+    let best={score:0,label:"Other"};
+    for(const ex of DATASET){
+      const exNorm=ex.norm;
+      let sc=0;
+      if(snorm.includes(exNorm)) sc=1;
+      else{
+        const j=jaccard(stok,ex.tok),d=dice(snorm,exNorm);
+        sc=Math.max(j,0.6*j+0.4*d);
+      }
+      if(sc>best.score) best={score:sc,label:ex.label,text:s};
+    }
+    // 0.45 threshold → slightly lenient
+    results.push({text:s,label:best.score>=0.45?best.label:"Other"});
+  }
+  return results;
+}
+
+function renderChips(labels){
+  chipsBox.innerHTML="";
+  const uniq=[...new Set(labels.map(l=>l.toLowerCase()))];
+  uniq.forEach(l=>{
+    const chip=document.createElement("span");
+    chip.className="chip "+labelClass(l);
+    chip.textContent=l[0].toUpperCase()+l.slice(1);
+    chipsBox.appendChild(chip);
+  });
+}
+
+function renderHighlight(text,matches){
+  let html="";
+  const sents=splitSentences(text);
+  sents.forEach(s=>{
+    const m=matches.find(x=>normalize(x.text)===normalize(s))||{label:"Other"};
+    html+=`<span class="${hlClass(m.label)}">${escapeHTML(s)} </span>`;
+  });
+  preview.innerHTML=html;
+  preview.style.display="block";
+}
+
+btn.onclick=async()=>{
+  const text=input.value.trim();
+  if(!text){chipsBox.innerHTML="<span class='chip other'>Please enter text</span>";return;}
+  chipsBox.innerHTML="<span class='chip other'>Analyzing…</span>";
+  preview.style.display="none";
+
+  const ok=await loadDataset();
+  if(!ok){chipsBox.innerHTML="<span class='chip toxic'>Dataset not found</span>";return;}
+
+  const matches=detect(text);
+  renderHighlight(text,matches);
+  renderChips(matches.map(m=>m.label));
+};
+</script>
+</body>
 </html>
