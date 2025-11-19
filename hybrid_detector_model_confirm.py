@@ -6,7 +6,9 @@ import argparse, json, os, subprocess, re, sys, io, unicodedata
 from typing import List, Tuple
 
 # ---------- Clean ANSI/spinner noise ----------
-ANSI_RE = re.compile(r'(?:\x1B[@-Z\\-_]|\x1B\[[0-?]*[ -/]*[@-~]|\x9B[0-?]*[ -/]*[@-~])')
+ANSI_RE = re.compile(r"(?:\x1B[@-Z\\-_]|\x1B\[[0-?]*[ -/]*[@-~]|\x9B[0-?]*[ -/]*[@-~])")
+
+
 def strip_ansi(s: str) -> str:
     if not s:
         return ""
@@ -14,14 +16,19 @@ def strip_ansi(s: str) -> str:
     s = re.sub(r"[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]", "", s)
     return s
 
+
 # ---------- UTF-8 safety ----------
 try:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     else:
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+        sys.stdout = io.TextIOWrapper(
+            sys.stdout.buffer, encoding="utf-8", errors="replace"
+        )
+        sys.stderr = io.TextIOWrapper(
+            sys.stderr.buffer, encoding="utf-8", errors="replace"
+        )
 except Exception:
     pass
 
@@ -32,6 +39,7 @@ FALLBACK = [
     ("হিন্দু বাচ্চাদের কি দেওয়া হলো", "Religious Hate"),
     ("মা পৃথিবীর আপন জন্য", "None"),
 ]
+
 
 # ---------- Helpers ----------
 def normalize_text(s: str) -> str:
@@ -68,11 +76,14 @@ def load_examples_from_jsonl(path: str) -> List[Tuple[str, str]]:
     return list(best.items()) or FALLBACK[:]
 
 
-def detect_in_paragraph(paragraph: str, examples: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
+def detect_in_paragraph(
+    paragraph: str, examples: List[Tuple[str, str]]
+) -> List[Tuple[str, str]]:
     """
     Detect matching dataset sentences in a Bangla paragraph.
     Uses exact substring + token Jaccard + bigram Dice similarity.
     """
+
     def tokenize(s: str) -> list[str]:
         return normalize_text(s).split(" ")
 
@@ -82,7 +93,8 @@ def detect_in_paragraph(paragraph: str, examples: List[Tuple[str, str]]) -> List
 
     def dice(a: str, b: str) -> float:
         def bigrams(x):
-            return [x[i:i+2] for i in range(len(x)-1)]
+            return [x[i : i + 2] for i in range(len(x) - 1)]
+
         A, B = bigrams(normalize_text(a)), bigrams(normalize_text(b))
         if not A or not B:
             return 0.0
@@ -90,7 +102,7 @@ def detect_in_paragraph(paragraph: str, examples: List[Tuple[str, str]]) -> List
         return (2 * inter) / (len(A) + len(B))
 
     paragraph_norm = normalize_text(paragraph)
-    sentences = re.split(r'(?<=[.!?।])\s+|\n+', paragraph_norm)
+    sentences = re.split(r"(?<=[.!?।])\s+|\n+", paragraph_norm)
     matches = []
 
     for sent_text in sentences:
@@ -132,9 +144,11 @@ def sanitize_model_output(raw: str) -> str:
     first = lines[0]
     for prefix in ("Label:", "label:", "Output:", "output:"):
         if first.startswith(prefix):
-            first = first[len(prefix):].strip()
+            first = first[len(prefix) :].strip()
             break
-    if (first.startswith('"') and first.endswith('"')) or (first.startswith("'") and first.endswith("'")):
+    if (first.startswith('"') and first.endswith('"')) or (
+        first.startswith("'") and first.endswith("'")
+    ):
         first = first[1:-1].strip()
     return first.strip()
 
@@ -151,8 +165,10 @@ def _call_ollama_stdin(model, prompt, timeout):
     )
 
 
-def query_ollama_label(model_name: str, sentence: str, timeout: int = DEFAULT_TIMEOUT) -> str:
-    prompt = f"You are a strict Bangla classifier. OUTPUT ONLY the label text (single line).\n\nSentence: \"{sentence}\"\n\nLabel:"
+def query_ollama_label(
+    model_name: str, sentence: str, timeout: int = DEFAULT_TIMEOUT
+) -> str:
+    prompt = f'You are a strict Bangla classifier. OUTPUT ONLY the label text (single line).\n\nSentence: "{sentence}"\n\nLabel:'
     try:
         proc = _call_ollama_stdin(model_name, prompt, timeout)
         out = strip_ansi(proc.stdout or "")
@@ -170,7 +186,9 @@ def query_ollama_label(model_name: str, sentence: str, timeout: int = DEFAULT_TI
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Bangla paragraph detector using dataset + optional model confirmation.")
+    parser = argparse.ArgumentParser(
+        description="Bangla paragraph detector using dataset + optional model confirmation."
+    )
     parser.add_argument("paragraph", help="Bangla paragraph")
     parser.add_argument("--model", "-m", default="mybanglamodel")
     parser.add_argument("--data", "-d", default="train_data.jsonl")
@@ -191,7 +209,11 @@ def main():
         print(f" → Dataset label: {label}")
         if label.lower() != "none":
             resp = query_ollama_label(args.model, sent, timeout=args.timeout)
-            clean = sanitize_model_output(resp) if resp and not resp.startswith("[") else label
+            clean = (
+                sanitize_model_output(resp)
+                if resp and not resp.startswith("[")
+                else label
+            )
             final = clean or label
         else:
             final = label

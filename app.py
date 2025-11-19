@@ -5,7 +5,7 @@
 from flask import Flask, request, jsonify, send_from_directory
 import os
 
-# Import only the functions (TRAIN_JSONL removed)
+
 from hybrid_detector_model_confirm import (
     normalize_text,
     load_examples_from_jsonl,
@@ -14,14 +14,12 @@ from hybrid_detector_model_confirm import (
     sanitize_model_output,
 )
 
-# ✅ Use your correct dataset
+
 TRAIN_JSONL = "train_data.jsonl"
 
 app = Flask(__name__, static_folder=".", static_url_path="")
 
-# -------------------------------------------------------
-# FAST IN-PROCESS DETECTOR FUNCTION
-# -------------------------------------------------------
+
 def analyze_paragraph_with_matches(paragraph: str, model_name: str = "mybanglamodel"):
     """
     Analyze paragraph in-process (no subprocess).
@@ -39,7 +37,7 @@ def analyze_paragraph_with_matches(paragraph: str, model_name: str = "mybanglamo
     found_matches = []
 
     for sent, ds_label in matches:
-        # skip model confirmation for "None" labels to save time
+
         if ds_label.lower() == "none":
             final_label = "None"
         else:
@@ -54,7 +52,6 @@ def analyze_paragraph_with_matches(paragraph: str, model_name: str = "mybanglamo
         found_matches.append({"text": sent, "label": final_label})
         found_labels.append(final_label.strip().capitalize())
 
-    # Deduplicate labels (preserve order)
     uniq = []
     seen = set()
     for l in found_labels:
@@ -66,10 +63,6 @@ def analyze_paragraph_with_matches(paragraph: str, model_name: str = "mybanglamo
     return uniq or ["None"], found_matches
 
 
-# -------------------------------------------------------
-# ROUTES
-# -------------------------------------------------------
-
 @app.route("/analyze", methods=["POST"])
 def analyze():
     data = request.get_json(silent=True) or {}
@@ -78,13 +71,14 @@ def analyze():
         return jsonify({"error": "No text provided"}), 400
 
     try:
-        labels, matches = analyze_paragraph_with_matches(paragraph, model_name="mybanglamodel")
+        labels, matches = analyze_paragraph_with_matches(
+            paragraph, model_name="mybanglamodel"
+        )
         return jsonify({"labels": labels, "matches": matches})
     except Exception as e:
         return jsonify({"error": f"Server error: {e}"}), 500
 
 
-# Serve static files (frontend)
 @app.route("/")
 def root():
     return send_from_directory(".", "index.html")
